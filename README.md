@@ -30,7 +30,7 @@ QEC_publication/
 ## Installation
 
 ```bash
-pip install numpy scipy matplotlib
+pip install numpy scipy matplotlib qutip
 ```
 
 ## Usage
@@ -44,15 +44,24 @@ from qec_config import QECConfig, BaconShorConfig, PlotConfig
 PlotConfig.apply()
 
 # Initialize 3-qubit repetition code
-rep = QECConfig(platform='ibm', n_points=1001)
+rep = QECConfig(n_points=1001)
 
 # Initialize Bacon-Shor subsystem code
-bs = BaconShorConfig(platform='ibm', n_points=1001)
+bs = BaconShorConfig(n_points=1001)
 
 # Compute energy spectrum with penalty Ep=50 MHz
 Ep = rep.Ep_MHz_to_rad(50)
 energies, idx_series = rep.get_or_compute_spectrum(Ep=Ep)
 ```
+
+### RAP Parameters
+
+Default parameters used for simulations:
+
+| Parameter | Value |
+|-----------|-------|
+| `omega_max` | 2π × 25 MHz (Rabi frequency) |
+| `T_max` | 4 μs (protocol duration) |
 
 ### Data Caching
 
@@ -94,15 +103,6 @@ energies, idx_series = config.track_code_eigenvalues(Ep=Ep)
 E_broken = config.break_at_swaps(E, idx_series)
 ```
 
-### Platform Parameters
-
-| Parameter | IBM | QuEra |
-|-----------|-----|-------|
-| `Omega_max` | 2π × 100 MHz | 2π × 10 MHz |
-| `Delta_0` | 2π × 150 MHz | 2π × 50 MHz |
-| `Delta_f` | 2π × 100 MHz | 2π × 50 MHz |
-| `T_protocol` | 1.5 μs | 4.0 μs |
-
 ## Notebooks
 
 ### `main_energy_spectrum_comparison.ipynb`
@@ -121,14 +121,14 @@ Analysis of the Bacon-Shor subsystem code with gauge penalization.
 The RAP Hamiltonian with penalty term:
 
 ```
-H(t) = -Δ(t)/2 · Z_L + Ω(t)/2 · X_L + E_p · P_error
+H(t) = Ω(t) · X_L + Δ(t) · Z_L - E_p · H_penalty
 ```
 
 where:
 - `Z_L`, `X_L` are logical Pauli operators
-- `P_error = I - |0_L⟩⟨0_L| - |1_L⟩⟨1_L|` projects onto error states
-- For repetition code: `P_error = (I - S1)/2 + (I - S2)/2`
-- For Bacon-Shor: `P_error = Σ_i (I - G_i)/2` (gauge operators)
+- `H_penalty` penalizes states outside the code space
+- For repetition code: `H_penalty = S1 + S2` (stabilizers)
+- For Bacon-Shor: `H_penalty = Σ_i G_i` (gauge operators)
 
 ### Operators
 

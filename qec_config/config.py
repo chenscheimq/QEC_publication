@@ -152,7 +152,6 @@ class QECConfigBase:
     Base configuration class for QEC simulations with RAP protocols.
 
     Provides shared functionality for all QEC codes:
-    - Platform-specific parameters (IBM, QuEra)
     - RAP pulse functions (Gaussian and sinusoidal)
     - Energy spectrum tracking utilities
     - Data caching
@@ -164,19 +163,9 @@ class QECConfigBase:
     - code_name: Class attribute for cache file naming
     """
 
-    # Platform presets
-    PLATFORMS = {
-        'ibm': {
-            'omega_max': 2 * np.pi * 25e6,  # 25 MHz Rabi frequency
-            'T_max': 4e-6,                   # 4 us total time
-            'description': 'IBM superconducting qubits'
-        },
-        'quera': {
-            'omega_max': 2 * np.pi * 4e6,   # 4 MHz Rabi frequency
-            'T_max': 1e-6,                   # 1 us total time
-            'description': 'QuEra neutral atoms'
-        }
-    }
+    # Default RAP parameters
+    DEFAULT_OMEGA_MAX = 2 * np.pi * 25e6  # 25 MHz Rabi frequency
+    DEFAULT_T_MAX = 4e-6                   # 4 us total time
 
     # Unit conversion factors
     TO_TIME_UNITS = 1e6           # s -> us
@@ -187,16 +176,10 @@ class QECConfigBase:
     # Subclasses should override
     code_name = 'base'
 
-    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
+    def __init__(self, omega_max=None, T_max=None, n_points=1001):
         """Initialize QEC configuration."""
-        self.platform = platform.lower()
-        if self.platform not in self.PLATFORMS:
-            raise ValueError(f"Unknown platform: {platform}. "
-                           f"Available: {list(self.PLATFORMS.keys())}")
-
-        preset = self.PLATFORMS[self.platform]
-        self.omega_max = omega_max if omega_max is not None else preset['omega_max']
-        self.T_max = T_max if T_max is not None else preset['T_max']
+        self.omega_max = omega_max if omega_max is not None else self.DEFAULT_OMEGA_MAX
+        self.T_max = T_max if T_max is not None else self.DEFAULT_T_MAX
         self.n_points = n_points
         self.t_list = np.linspace(0, self.T_max, n_points)
 
@@ -374,7 +357,6 @@ class QECConfigBase:
         """Generate a unique cache key for simulation parameters."""
         params = {
             'code': self.code_name,
-            'platform': self.platform,
             'omega_max': float(self.omega_max),
             'T_max': float(self.T_max),
             'n_points': self.n_points,
@@ -393,7 +375,7 @@ class QECConfigBase:
 
         Ep_MHz = self.to_MHz(Ep)
         cache_key = self._get_cache_key(Ep, pulse_type)
-        filename = f"spectrum_{self.code_name}_{self.platform}_{pulse_type}_Ep{Ep_MHz:.1f}MHz_{cache_key}.npz"
+        filename = f"spectrum_{self.code_name}_{pulse_type}_Ep{Ep_MHz:.1f}MHz_{cache_key}.npz"
         return data_dir / filename
 
     def save_spectrum_data(self, energies, idx_series, Ep, pulse_type, data_dir=None):
@@ -411,7 +393,6 @@ class QECConfigBase:
 
         metadata = {
             'code': self.code_name,
-            'platform': self.platform,
             'omega_max_MHz': self.to_MHz(self.omega_max),
             'T_max_us': self.to_us(self.T_max),
             'n_points': self.n_points,
@@ -472,14 +453,14 @@ class QECConfig(QECConfigBase):
 
     Examples
     --------
-    >>> config = QECConfig()  # IBM platform
-    >>> config = QECConfig(platform='quera')  # QuEra platform
+    >>> config = QECConfig()
+    >>> config = QECConfig(n_points=2001)  # Higher resolution
     """
 
     code_name = 'rep3'
 
-    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
-        super().__init__(platform, omega_max, T_max, n_points)
+    def __init__(self, omega_max=None, T_max=None, n_points=1001):
+        super().__init__(omega_max, T_max, n_points)
 
     def _init_operators(self):
         """Initialize operators for the 3-qubit repetition code."""
@@ -510,7 +491,7 @@ class QECConfig(QECConfigBase):
     def info(self):
         """Print configuration summary."""
         print("=" * 60)
-        print(f"3-Qubit Repetition [[3,1,3]] ({self.platform.upper()} Platform)")
+        print("3-Qubit Repetition Code [[3,1,3]]")
         print("=" * 60)
         print(f"  omega_max = {self.to_MHz(self.omega_max):.1f} MHz")
         print(f"  T_max     = {self.to_us(self.T_max):.1f} us")
@@ -532,14 +513,14 @@ class BaconShorConfig(QECConfigBase):
 
     Examples
     --------
-    >>> config = BaconShorConfig()  # IBM platform
-    >>> config = BaconShorConfig(platform='quera')
+    >>> config = BaconShorConfig()
+    >>> config = BaconShorConfig(n_points=2001)  # Higher resolution
     """
 
     code_name = 'bacon_shor'
 
-    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
-        super().__init__(platform, omega_max, T_max, n_points)
+    def __init__(self, omega_max=None, T_max=None, n_points=1001):
+        super().__init__(omega_max, T_max, n_points)
 
     def _init_operators(self):
         """Initialize operators for the Bacon-Shor [[4,1,1,2]] code."""
@@ -631,7 +612,7 @@ class BaconShorConfig(QECConfigBase):
     def info(self):
         """Print configuration summary."""
         print("=" * 60)
-        print(f"Bacon-Shor [[4,1,1,2]] ({self.platform.upper()} Platform)")
+        print("Bacon-Shor [[4,1,1,2]] Subsystem Code")
         print("=" * 60)
         print(f"  omega_max = {self.to_MHz(self.omega_max):.1f} MHz")
         print(f"  T_max     = {self.to_us(self.T_max):.1f} us")
