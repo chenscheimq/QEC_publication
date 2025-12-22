@@ -8,94 +8,160 @@ quantum error correction simulations with RAP protocols.
 import numpy as np
 import matplotlib as mpl
 from qutip import qeye, sigmax, sigmay, sigmaz, tensor, basis, expect
+from pathlib import Path
+import hashlib
+import json
 
 
 class PlotConfig:
     """
-    Publication-quality matplotlib configuration.
+    Publication-quality matplotlib configuration for Quantum journal.
+
+    Follows best practices for physics publications:
+    - Clean serif fonts compatible with LaTeX documents
+    - Consistent sizing for single/double column figures
+    - High-quality vector output (PDF)
 
     Usage:
         PlotConfig.apply()  # Apply to current matplotlib session
     """
 
-    # Font sizes
-    FONT_SIZE = 12
-    AXES_LABEL_SIZE = 14
-    AXES_TITLE_SIZE = 16
-    TICK_LABEL_SIZE = 12
-    LEGEND_FONT_SIZE = 18
+    # Quantum journal column widths (approximate, in inches)
+    SINGLE_COLUMN_WIDTH = 3.4  # ~86mm
+    DOUBLE_COLUMN_WIDTH = 7.0  # ~178mm
+
+    # Font sizes (optimized for readability at publication size)
+    FONT_SIZE = 10
+    AXES_LABEL_SIZE = 11
+    AXES_TITLE_SIZE = 12
+    TICK_LABEL_SIZE = 9
+    LEGEND_FONT_SIZE = 9
 
     # Line styles
-    LINE_WIDTH = 2.5
-    AXES_LINE_WIDTH = 1.2
+    LINE_WIDTH = 1.5
+    AXES_LINE_WIDTH = 0.8
+    GRID_LINE_WIDTH = 0.5
 
-    # Colors
-    COLORS_LOGICAL = ['red', 'blue']
-    COLORS_ERROR = ['gray']  # Error states in gray for clarity
-    COLOR_ERROR_DEFAULT = 'black'
+    # Marker sizes
+    MARKER_SIZE = 4
+
+    # Colors - colorblind-friendly palette
+    COLORS_LOGICAL = ['#E41A1C', '#377EB8']  # Red, Blue (ColorBrewer)
+    COLORS_ERROR = ['#999999']  # Gray for error states
+    COLOR_ERROR_DEFAULT = '#666666'
 
     # Gap annotation colors
-    COLOR_GAP_RAP = 'purple'
-    COLOR_GAP_QEC = 'darkgreen'
+    COLOR_GAP_RAP = '#984EA3'  # Purple
+    COLOR_GAP_QEC = '#4DAF4A'  # Green
+
+    # Additional colors for extended palettes
+    COLORS_EXTENDED = [
+        '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3',
+        '#FF7F00', '#FFFF33', '#A65628', '#F781BF'
+    ]
 
     @classmethod
-    def apply(cls):
-        """Apply publication-quality matplotlib settings."""
+    def apply(cls, use_latex=False):
+        """
+        Apply publication-quality matplotlib settings.
+
+        Parameters
+        ----------
+        use_latex : bool, optional
+            If True, use LaTeX for text rendering (requires LaTeX installation).
+            Default: False (uses mathtext which is more portable)
+        """
+        # Font configuration
         mpl.rcParams['font.size'] = cls.FONT_SIZE
+        mpl.rcParams['font.family'] = 'serif'
+        mpl.rcParams['font.serif'] = ['Computer Modern Roman', 'DejaVu Serif',
+                                       'Times New Roman', 'serif']
+
+        # Use LaTeX if requested and available
+        if use_latex:
+            mpl.rcParams['text.usetex'] = True
+            mpl.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
+        else:
+            mpl.rcParams['text.usetex'] = False
+            mpl.rcParams['mathtext.fontset'] = 'cm'  # Computer Modern
+
+        # Axes configuration
         mpl.rcParams['axes.labelsize'] = cls.AXES_LABEL_SIZE
         mpl.rcParams['axes.titlesize'] = cls.AXES_TITLE_SIZE
+        mpl.rcParams['axes.linewidth'] = cls.AXES_LINE_WIDTH
+        mpl.rcParams['axes.labelpad'] = 4
+
+        # Tick configuration
         mpl.rcParams['xtick.labelsize'] = cls.TICK_LABEL_SIZE
         mpl.rcParams['ytick.labelsize'] = cls.TICK_LABEL_SIZE
+        mpl.rcParams['xtick.major.width'] = cls.AXES_LINE_WIDTH
+        mpl.rcParams['ytick.major.width'] = cls.AXES_LINE_WIDTH
+        mpl.rcParams['xtick.minor.width'] = cls.AXES_LINE_WIDTH * 0.6
+        mpl.rcParams['ytick.minor.width'] = cls.AXES_LINE_WIDTH * 0.6
+        mpl.rcParams['xtick.major.size'] = 4
+        mpl.rcParams['ytick.major.size'] = 4
+        mpl.rcParams['xtick.minor.size'] = 2
+        mpl.rcParams['ytick.minor.size'] = 2
+        mpl.rcParams['xtick.direction'] = 'in'
+        mpl.rcParams['ytick.direction'] = 'in'
+
+        # Legend configuration
         mpl.rcParams['legend.fontsize'] = cls.LEGEND_FONT_SIZE
+        mpl.rcParams['legend.framealpha'] = 0.9
+        mpl.rcParams['legend.edgecolor'] = '0.8'
+        mpl.rcParams['legend.borderpad'] = 0.4
+        mpl.rcParams['legend.handlelength'] = 1.5
+
+        # Line configuration
         mpl.rcParams['lines.linewidth'] = cls.LINE_WIDTH
-        mpl.rcParams['axes.linewidth'] = cls.AXES_LINE_WIDTH
+        mpl.rcParams['lines.markersize'] = cls.MARKER_SIZE
+
+        # Grid configuration
+        mpl.rcParams['grid.linewidth'] = cls.GRID_LINE_WIDTH
+        mpl.rcParams['grid.alpha'] = 0.3
+
+        # Figure configuration
+        mpl.rcParams['figure.dpi'] = 150
+        mpl.rcParams['savefig.dpi'] = 300
+        mpl.rcParams['savefig.format'] = 'pdf'
+        mpl.rcParams['savefig.bbox'] = 'tight'
+        mpl.rcParams['savefig.pad_inches'] = 0.05
+
+        # PDF backend settings for vector output
+        mpl.rcParams['pdf.fonttype'] = 42  # TrueType fonts in PDF
+
+    @classmethod
+    def figure_single_column(cls, aspect_ratio=0.75):
+        """Create a figure sized for single column width."""
+        import matplotlib.pyplot as plt
+        width = cls.SINGLE_COLUMN_WIDTH
+        height = width * aspect_ratio
+        return plt.figure(figsize=(width, height))
+
+    @classmethod
+    def figure_double_column(cls, aspect_ratio=0.4):
+        """Create a figure sized for double column width."""
+        import matplotlib.pyplot as plt
+        width = cls.DOUBLE_COLUMN_WIDTH
+        height = width * aspect_ratio
+        return plt.figure(figsize=(width, height))
 
 
-class QECConfig:
+class QECConfigBase:
     """
-    Configuration class for 3-qubit repetition code QEC simulations.
+    Base configuration class for QEC simulations with RAP protocols.
 
-    This class provides:
+    Provides shared functionality for all QEC codes:
     - Platform-specific parameters (IBM, QuEra)
-    - Quantum operators for the 3-qubit repetition code
     - RAP pulse functions (Gaussian and sinusoidal)
     - Energy spectrum tracking utilities
+    - Data caching
 
-    Parameters
-    ----------
-    platform : str, optional
-        Platform to use: 'ibm' (default) or 'quera'
-    omega_max : float, optional
-        Maximum Rabi frequency in rad/s. If None, uses platform default.
-    T_max : float, optional
-        Total protocol time in seconds. If None, uses platform default.
-    n_points : int, optional
-        Number of time points for simulation. Default: 5001.
-
-    Attributes
-    ----------
-    omega_max : float
-        Maximum Rabi frequency [rad/s]
-    T_max : float
-        Total protocol time [s]
-    t_list : ndarray
-        Time grid for simulations
-    I, X, Y, Z : Qobj
-        Single-qubit Pauli operators
-    X_L, Z_L, I_L : Qobj
-        3-qubit logical operators
-    S1, S2 : Qobj
-        Stabilizer operators (Z_1 Z_2 and Z_2 Z_3)
-    P_code : Qobj
-        Code space projector
-    logical_zero, logical_one : Qobj
-        Logical basis states |0_L> = |000>, |1_L> = |111>
-
-    Examples
-    --------
-    >>> config = QECConfig()  # IBM platform
-    >>> config = QECConfig(platform='quera')  # QuEra platform
-    >>> config = QECConfig(omega_max=2*np.pi*30e6, T_max=5e-6)  # Custom
+    Subclasses must implement:
+    - _init_operators(): Initialize code-specific operators
+    - _get_penalty_term(): Return the penalty Hamiltonian
+    - info(): Print code-specific information
+    - code_name: Class attribute for cache file naming
     """
 
     # Platform presets
@@ -118,10 +184,11 @@ class QECConfig:
     TIME_UNIT_LABEL = r'$\mu$s'
     FREQ_UNIT_LABEL = 'MHz'
 
-    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=5001):
-        """Initialize QEC configuration."""
+    # Subclasses should override
+    code_name = 'base'
 
-        # Set platform parameters
+    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
+        """Initialize QEC configuration."""
         self.platform = platform.lower()
         if self.platform not in self.PLATFORMS:
             raise ValueError(f"Unknown platform: {platform}. "
@@ -131,120 +198,44 @@ class QECConfig:
         self.omega_max = omega_max if omega_max is not None else preset['omega_max']
         self.T_max = T_max if T_max is not None else preset['T_max']
         self.n_points = n_points
-
-        # Time grid
         self.t_list = np.linspace(0, self.T_max, n_points)
 
-        # Initialize operators
-        self._init_operators()
-
-    def _init_operators(self):
-        """Initialize quantum operators for the 3-qubit repetition code."""
-
-        # Single-qubit primitives
+        # Single-qubit primitives (shared)
         self.I = qeye(2)
         self.X = sigmax()
         self.Y = sigmay()
         self.Z = sigmaz()
 
-        # Logical operators (3-qubit repetition code)
-        self.X_L = tensor(self.X, self.X, self.X)
-        self.Z_L = tensor(self.Z, self.Z, self.Z)
-        self.I_L = tensor(self.I, self.I, self.I)
+        # Code-specific initialization
+        self._init_operators()
 
-        # Stabilizers for X-error protection
-        self.S1 = tensor(self.Z, self.Z, self.I)  # Z_1 Z_2
-        self.S2 = tensor(self.I, self.Z, self.Z)  # Z_2 Z_3
+    def _init_operators(self):
+        """Initialize code-specific operators. Override in subclass."""
+        raise NotImplementedError
 
-        # Logical basis states
-        ket0 = basis(2, 0)
-        ket1 = basis(2, 1)
-        self.logical_zero = tensor(ket0, ket0, ket0)  # |000>
-        self.logical_one = tensor(ket1, ket1, ket1)   # |111>
-
-        # Code space projector: P = 1/4 * (I + S1)(I + S2)
-        self.P_code = 0.25 * (self.I_L + self.S1) * (self.I_L + self.S2)
-
-        # Hilbert space dimension
-        self.dim = 2**3
+    def _get_penalty_term(self):
+        """Return the penalty Hamiltonian term. Override in subclass."""
+        raise NotImplementedError
 
     # =========================================================================
     # RAP Pulse Functions
     # =========================================================================
 
     def omega_gaussian(self, t):
-        """
-        Gaussian RAP pulse for Rabi frequency.
-
-        Omega(t) = omega_max * exp(-0.5 * ((t - T/2) / sigma)^2)
-        where sigma = T_max / 7
-
-        Parameters
-        ----------
-        t : float or ndarray
-            Time value(s) in seconds
-
-        Returns
-        -------
-        float or ndarray
-            Rabi frequency in rad/s
-        """
+        """Gaussian RAP pulse: Omega(t) = omega_max * exp(-0.5*((t-T/2)/sigma)^2)"""
         sigma = self.T_max / 7
         return self.omega_max * np.exp(-0.5 * ((t - self.T_max/2) / sigma)**2)
 
     def delta_linear(self, t):
-        """
-        Linear detuning sweep for RAP.
-
-        Delta(t) = omega_max * (2t/T - 1)
-        Sweeps from -omega_max to +omega_max
-
-        Parameters
-        ----------
-        t : float or ndarray
-            Time value(s) in seconds
-
-        Returns
-        -------
-        float or ndarray
-            Detuning in rad/s
-        """
+        """Linear detuning sweep from -omega_max to +omega_max."""
         return self.omega_max * (t / (self.T_max/2) - 1)
 
     def omega_sinusoidal(self, t):
-        """
-        Sinusoidal RAP pulse for transverse field.
-
-        Omega(t) = omega_max * sin(pi * t / T)
-
-        Parameters
-        ----------
-        t : float or ndarray
-            Time value(s) in seconds
-
-        Returns
-        -------
-        float or ndarray
-            Transverse field amplitude in rad/s
-        """
+        """Sinusoidal RAP pulse: Omega(t) = omega_max * sin(pi*t/T)"""
         return self.omega_max * np.sin(np.pi * t / self.T_max)
 
     def delta_sinusoidal(self, t):
-        """
-        Sinusoidal detuning sweep for RAP.
-
-        Delta(t) = -omega_max * cos(pi * t / T)
-
-        Parameters
-        ----------
-        t : float or ndarray
-            Time value(s) in seconds
-
-        Returns
-        -------
-        float or ndarray
-            Longitudinal field in rad/s
-        """
+        """Sinusoidal detuning: Delta(t) = -omega_max * cos(pi*t/T)"""
         return -self.omega_max * np.cos(np.pi * t / self.T_max)
 
     # =========================================================================
@@ -252,25 +243,7 @@ class QECConfig:
     # =========================================================================
 
     def H_rap(self, t, Ep=0, pulse_type='gaussian'):
-        """
-        Build the RAP Hamiltonian at time t.
-
-        H(t) = Omega(t) * X_L + Delta(t) * Z_L - Ep * (S1 + S2)
-
-        Parameters
-        ----------
-        t : float
-            Time in seconds
-        Ep : float, optional
-            Penalty energy in rad/s. Default: 0.
-        pulse_type : str, optional
-            Pulse shape: 'gaussian' or 'sinusoidal'. Default: 'gaussian'.
-
-        Returns
-        -------
-        Qobj
-            Hamiltonian at time t
-        """
+        """Build RAP Hamiltonian: H(t) = Omega(t)*X_L + Delta(t)*Z_L - Ep*H_penalty"""
         if pulse_type == 'gaussian':
             omega = self.omega_gaussian(t)
             delta = self.delta_linear(t)
@@ -280,25 +253,11 @@ class QECConfig:
         else:
             raise ValueError(f"Unknown pulse_type: {pulse_type}")
 
-        H = self.X_L * omega + self.Z_L * delta - Ep * (self.S1 + self.S2)
+        H = self.X_L * omega + self.Z_L * delta - Ep * self._get_penalty_term()
         return H.to('csr')
 
     def make_H_func(self, Ep=0, pulse_type='gaussian'):
-        """
-        Create a Hamiltonian function H(t) for a given Ep.
-
-        Parameters
-        ----------
-        Ep : float, optional
-            Penalty energy in rad/s. Default: 0.
-        pulse_type : str, optional
-            Pulse shape: 'gaussian' or 'sinusoidal'. Default: 'gaussian'.
-
-        Returns
-        -------
-        callable
-            Function H(t) returning the Hamiltonian at time t
-        """
+        """Create a Hamiltonian function H(t) for a given Ep."""
         def H_func(t):
             return self.H_rap(t, Ep=Ep, pulse_type=pulse_type)
         return H_func
@@ -313,34 +272,11 @@ class QECConfig:
         return abs((ket.dag() * v))**2
 
     def track_code_eigenvalues(self, H_func, return_indices=False):
-        """
-        Track energy eigenvalues throughout the RAP protocol.
-
-        Identifies the two code-space states by their overlap with the
-        code projector, and assigns them to |0_L> or |1_L> based on
-        instantaneous logical content. This allows tracking through
-        avoided crossings where the character swaps.
-
-        Parameters
-        ----------
-        H_func : callable
-            Function H(t) returning Hamiltonian at time t
-        return_indices : bool, optional
-            If True, also return eigenstate indices. Default: False.
-
-        Returns
-        -------
-        energies : dict
-            Dictionary mapping index -> list of energies.
-            0, 1 are code-space states; 2-7 are error states.
-        idx_series : tuple of lists, optional
-            If return_indices=True, returns (idx_0L, idx_1L) tracking
-            which eigenstate index corresponds to each logical state.
-        """
+        """Track energy eigenvalues throughout the RAP protocol."""
         energies = {i: [] for i in range(self.dim)}
         idx_series_0, idx_series_1 = [], []
 
-        for ti, t in enumerate(self.t_list):
+        for t in self.t_list:
             evals, evecs = H_func(t).eigenstates()
 
             # Find code-space states by projector overlap
@@ -364,13 +300,12 @@ class QECConfig:
             idx_series_0.append(idx0L)
             idx_series_1.append(idx1L)
 
-            # Error states (remaining eigenstates, sorted by energy)
+            # Error states
             rest = sorted([j for j in range(self.dim) if j not in (idx0L, idx1L)],
                          key=lambda j: float(evals[j]))
             for k, j in enumerate(rest, start=2):
                 energies[k].append(float(evals[j]))
 
-        # Convert to arrays
         for i in energies:
             energies[i] = np.array(energies[i])
 
@@ -380,58 +315,17 @@ class QECConfig:
 
     @staticmethod
     def break_at_swaps(y_vals, idx_series):
-        """
-        Insert NaN at points where eigenstate assignment changes.
-
-        This prevents vertical line segments when plotting energy
-        levels that swap character during the protocol.
-
-        Parameters
-        ----------
-        y_vals : array-like
-            Energy values to break
-        idx_series : array-like
-            Eigenstate indices at each time point
-
-        Returns
-        -------
-        ndarray
-            Energy values with NaN inserted at swap points
-        """
+        """Insert NaN at eigenstate assignment changes to break plot lines."""
         y_broken = np.array(y_vals, dtype=float).copy()
         idx_arr = np.array(idx_series, dtype=int)
-
-        # Find where assignment changes
         swaps = np.where(idx_arr[1:] != idx_arr[:-1])[0] + 1
-
-        # Insert NaN at swap points
         for s in swaps:
             if 0 < s < len(y_broken):
                 y_broken[s] = np.nan
-
         return y_broken
 
     def compute_gaps(self, energies_no_penalty, energies_with_penalty):
-        """
-        Compute RAP gap and QEC gap from energy spectra.
-
-        Parameters
-        ----------
-        energies_no_penalty : dict
-            Energies from track_code_eigenvalues with Ep=0
-        energies_with_penalty : dict
-            Energies from track_code_eigenvalues with Ep>0
-
-        Returns
-        -------
-        dict
-            Dictionary with:
-            - 'delta_rap': Minimum gap between logical states (Ep=0)
-            - 't_delta_rap': Time at minimum RAP gap
-            - 'delta_min_ep': Minimum code-to-error gap (Ep>0)
-            - 't_delta_min_ep': Time at minimum QEC gap
-        """
-        # Convert to MHz for output
+        """Compute RAP gap and QEC gap from energy spectra."""
         E0_no = energies_no_penalty[0] * self.TO_FREQ_UNITS
         E1_no = energies_no_penalty[1] * self.TO_FREQ_UNITS
 
@@ -439,7 +333,6 @@ class QECConfig:
         delta_rap = np.min(gap_rap)
         t_delta_rap = self.t_list[np.argmin(gap_rap)] * self.TO_TIME_UNITS
 
-        # QEC gap: code-to-error separation
         E0_pen = energies_with_penalty[0] * self.TO_FREQ_UNITS
         E1_pen = energies_with_penalty[1] * self.TO_FREQ_UNITS
         max_code = np.maximum(E0_pen, E1_pen)
@@ -453,10 +346,8 @@ class QECConfig:
         t_delta_min_ep = self.t_list[np.argmin(gap_qec)] * self.TO_TIME_UNITS
 
         return {
-            'delta_rap': delta_rap,
-            't_delta_rap': t_delta_rap,
-            'delta_min_ep': delta_min_ep,
-            't_delta_min_ep': t_delta_min_ep
+            'delta_rap': delta_rap, 't_delta_rap': t_delta_rap,
+            'delta_min_ep': delta_min_ep, 't_delta_min_ep': t_delta_min_ep
         }
 
     # =========================================================================
@@ -475,16 +366,277 @@ class QECConfig:
         """Convert penalty energy from MHz to rad/s."""
         return Ep_MHz * 2 * np.pi * 1e6
 
+    # =========================================================================
+    # Data Caching
+    # =========================================================================
+
+    def _get_cache_key(self, Ep, pulse_type):
+        """Generate a unique cache key for simulation parameters."""
+        params = {
+            'code': self.code_name,
+            'platform': self.platform,
+            'omega_max': float(self.omega_max),
+            'T_max': float(self.T_max),
+            'n_points': self.n_points,
+            'Ep': float(Ep),
+            'pulse_type': pulse_type
+        }
+        param_str = json.dumps(params, sort_keys=True)
+        return hashlib.md5(param_str.encode()).hexdigest()[:12]
+
+    def get_data_path(self, Ep, pulse_type, data_dir=None):
+        """Get the path for cached data file."""
+        if data_dir is None:
+            data_dir = Path(__file__).parent.parent / 'data'
+        else:
+            data_dir = Path(data_dir)
+
+        Ep_MHz = self.to_MHz(Ep)
+        cache_key = self._get_cache_key(Ep, pulse_type)
+        filename = f"spectrum_{self.code_name}_{self.platform}_{pulse_type}_Ep{Ep_MHz:.1f}MHz_{cache_key}.npz"
+        return data_dir / filename
+
+    def save_spectrum_data(self, energies, idx_series, Ep, pulse_type, data_dir=None):
+        """Save computed energy spectrum data to disk."""
+        filepath = self.get_data_path(Ep, pulse_type, data_dir)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            't_list': self.t_list,
+            'idx_0L': np.array(idx_series[0]),
+            'idx_1L': np.array(idx_series[1]),
+        }
+        for i, arr in energies.items():
+            data[f'E{i}'] = arr
+
+        metadata = {
+            'code': self.code_name,
+            'platform': self.platform,
+            'omega_max_MHz': self.to_MHz(self.omega_max),
+            'T_max_us': self.to_us(self.T_max),
+            'n_points': self.n_points,
+            'Ep_MHz': self.to_MHz(Ep),
+            'pulse_type': pulse_type,
+            'dim': self.dim
+        }
+        data['metadata'] = np.array([json.dumps(metadata)])
+
+        np.savez_compressed(filepath, **data)
+        return filepath
+
+    def load_spectrum_data(self, Ep, pulse_type, data_dir=None):
+        """Load cached energy spectrum data from disk."""
+        filepath = self.get_data_path(Ep, pulse_type, data_dir)
+
+        if not filepath.exists():
+            return None, None
+
+        data = np.load(filepath)
+        energies = {}
+        for i in range(self.dim):
+            key = f'E{i}'
+            if key in data:
+                energies[i] = data[key]
+
+        idx_series = (list(data['idx_0L']), list(data['idx_1L']))
+        return energies, idx_series
+
+    def get_or_compute_spectrum(self, Ep, pulse_type='gaussian', data_dir=None,
+                                 force_recompute=False, verbose=True):
+        """Get energy spectrum from cache or compute if not available."""
+        Ep_MHz = self.to_MHz(Ep)
+
+        if not force_recompute:
+            energies, idx_series = self.load_spectrum_data(Ep, pulse_type, data_dir)
+            if energies is not None:
+                if verbose:
+                    print(f"  Loaded cached data for Ep = {Ep_MHz:.1f} MHz")
+                return energies, idx_series
+
+        if verbose:
+            print(f"  Computing spectrum for Ep = {Ep_MHz:.1f} MHz...")
+
+        H_func = self.make_H_func(Ep=Ep, pulse_type=pulse_type)
+        energies, idx_series = self.track_code_eigenvalues(H_func, return_indices=True)
+
+        filepath = self.save_spectrum_data(energies, idx_series, Ep, pulse_type, data_dir)
+        if verbose:
+            print(f"    Saved to: {filepath.name}")
+
+        return energies, idx_series
+
+
+class QECConfig(QECConfigBase):
+    """
+    Configuration for 3-qubit repetition code [[3,1,3]] QEC simulations.
+
+    Examples
+    --------
+    >>> config = QECConfig()  # IBM platform
+    >>> config = QECConfig(platform='quera')  # QuEra platform
+    """
+
+    code_name = 'rep3'
+
+    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
+        super().__init__(platform, omega_max, T_max, n_points)
+
+    def _init_operators(self):
+        """Initialize operators for the 3-qubit repetition code."""
+        ket0, ket1 = basis(2, 0), basis(2, 1)
+
+        # Logical operators
+        self.X_L = tensor(self.X, self.X, self.X)
+        self.Z_L = tensor(self.Z, self.Z, self.Z)
+        self.I_L = tensor(self.I, self.I, self.I)
+
+        # Stabilizers
+        self.S1 = tensor(self.Z, self.Z, self.I)  # Z_1 Z_2
+        self.S2 = tensor(self.I, self.Z, self.Z)  # Z_2 Z_3
+
+        # Logical basis states
+        self.logical_zero = tensor(ket0, ket0, ket0)  # |000>
+        self.logical_one = tensor(ket1, ket1, ket1)   # |111>
+
+        # Code space projector
+        self.P_code = 0.25 * (self.I_L + self.S1) * (self.I_L + self.S2)
+
+        self.dim = 2**3
+
+    def _get_penalty_term(self):
+        """Return stabilizer penalty: S1 + S2"""
+        return self.S1 + self.S2
+
     def info(self):
         """Print configuration summary."""
         print("=" * 60)
-        print(f"QEC Configuration ({self.platform.upper()} Platform)")
+        print(f"3-Qubit Repetition [[3,1,3]] ({self.platform.upper()} Platform)")
         print("=" * 60)
         print(f"  omega_max = {self.to_MHz(self.omega_max):.1f} MHz")
         print(f"  T_max     = {self.to_us(self.T_max):.1f} us")
         print(f"  n_points  = {self.n_points}")
         print("-" * 60)
-        print("  Code: 3-qubit repetition [[3,1,3]]")
-        print("  Logical states: |0_L> = |000>, |1_L> = |111>")
-        print("  Stabilizers: S1 = Z1*Z2, S2 = Z2*Z3")
+        print("  Logical: |0_L> = |000>, |1_L> = |111>")
+        print("  Stabilizers: S1 = Z1Z2, S2 = Z2Z3")
+        print("=" * 60)
+
+
+class BaconShorConfig(QECConfigBase):
+    """
+    Configuration for Bacon-Shor [[4,1,1,2]] subsystem code simulations.
+
+    Qubit layout (2x2 grid):
+        1 -- 2
+        |    |
+        3 -- 4
+
+    Examples
+    --------
+    >>> config = BaconShorConfig()  # IBM platform
+    >>> config = BaconShorConfig(platform='quera')
+    """
+
+    code_name = 'bacon_shor'
+
+    def __init__(self, platform='ibm', omega_max=None, T_max=None, n_points=1001):
+        super().__init__(platform, omega_max, T_max, n_points)
+
+    def _init_operators(self):
+        """Initialize operators for the Bacon-Shor [[4,1,1,2]] code."""
+        ket0, ket1 = basis(2, 0), basis(2, 1)
+
+        # 4-qubit identity
+        self.I_L = tensor(self.I, self.I, self.I, self.I)
+
+        # Logical operators
+        self.X_L = tensor(self.X, self.I, self.X, self.I)  # X1 X3
+        self.Z_L = tensor(self.Z, self.Z, self.I, self.I)  # Z1 Z2
+
+        # Gauge (ancilla) operators
+        self.X_A = tensor(self.I, self.X, self.I, self.X)  # X2 X4
+        self.Z_A = tensor(self.I, self.I, self.Z, self.Z)  # Z3 Z4
+
+        # Gauge generators
+        self.G = [
+            tensor(self.X, self.X, self.I, self.I),  # X1 X2
+            tensor(self.Z, self.I, self.Z, self.I),  # Z1 Z3
+            tensor(self.I, self.I, self.X, self.X),  # X3 X4
+            tensor(self.I, self.Z, self.I, self.Z),  # Z2 Z4
+        ]
+
+        # Logical basis states
+        self.logical_zero = (tensor(ket0, ket0, ket0, ket0) +
+                            tensor(ket1, ket1, ket1, ket1)).unit()
+        self.logical_one = (self.X_L * self.logical_zero).unit()
+
+        # Gauge qubit states
+        self.ancilla_zero = (tensor(ket0, ket0, ket1, ket1) +
+                            tensor(ket1, ket1, ket0, ket0)).unit()
+        self.ancilla_one = (self.X_A * self.ancilla_zero).unit()
+
+        # Code space projector
+        self.P_code = self.I_L
+        for g in self.G:
+            self.P_code = self.P_code * (self.I_L + g) / 2
+
+        self.dim = 2**4
+
+    def _get_penalty_term(self):
+        """Return gauge penalty: sum(G)"""
+        return sum(self.G)
+
+    def track_logical_projected(self, Ep, pulse_type='gaussian'):
+        """
+        Track logical states by projecting H onto the 2D logical subspace.
+
+        Useful for Ep=0 where full tracking can be noisy.
+        """
+        H_func = self.make_H_func(Ep=Ep, pulse_type=pulse_type)
+        basis_states = [self.logical_zero, self.logical_one]
+
+        E0_list, E1_list = [], []
+        idx_series_0, idx_series_1 = [], []
+
+        for t in self.t_list:
+            H_t = H_func(t)
+
+            # Build 2x2 matrix in logical basis
+            H_sub = np.zeros((2, 2), dtype=complex)
+            for i, ket_i in enumerate(basis_states):
+                for j, ket_j in enumerate(basis_states):
+                    element = ket_i.dag() * H_t * ket_j
+                    if hasattr(element, 'full'):
+                        H_sub[i, j] = element.full()[0, 0]
+                    else:
+                        H_sub[i, j] = complex(element)
+
+            evals, vecs = np.linalg.eigh(H_sub)
+
+            # Assign by logical overlap
+            w0a, w1a = abs(vecs[0, 0])**2, abs(vecs[1, 0])**2
+            w0b, w1b = abs(vecs[0, 1])**2, abs(vecs[1, 1])**2
+
+            if (w0a + w1b) >= (w0b + w1a):
+                idx0, idx1 = 0, 1
+            else:
+                idx0, idx1 = 1, 0
+
+            E0_list.append(float(evals[idx0]))
+            E1_list.append(float(evals[idx1]))
+            idx_series_0.append(idx0)
+            idx_series_1.append(idx1)
+
+        return np.array(E0_list), np.array(E1_list), (idx_series_0, idx_series_1)
+
+    def info(self):
+        """Print configuration summary."""
+        print("=" * 60)
+        print(f"Bacon-Shor [[4,1,1,2]] ({self.platform.upper()} Platform)")
+        print("=" * 60)
+        print(f"  omega_max = {self.to_MHz(self.omega_max):.1f} MHz")
+        print(f"  T_max     = {self.to_us(self.T_max):.1f} us")
+        print(f"  n_points  = {self.n_points}")
+        print("-" * 60)
+        print("  Logical: |0_L> = (|0000>+|1111>)/sqrt(2)")
+        print("  Gauge: X1X2, Z1Z3, X3X4, Z2Z4")
         print("=" * 60)
