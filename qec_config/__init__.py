@@ -9,17 +9,47 @@ Supported codes:
 - Bacon-Shor [[4,1,1,2]] subsystem code (BaconShorConfig)
 
 Usage:
-    from qec_config import QECConfig, BaconShorConfig
+    from qec_config import QECConfig, BaconShorConfig, PlotConfig
 
     # 3-qubit repetition code
-    config = QECConfig()  # IBM platform
-    config = QECConfig(platform='quera')  # QuEra platform
+    config = QECConfig()
+    config = QECConfig(n_points=2001)  # Higher resolution
 
     # Bacon-Shor subsystem code
     bs_config = BaconShorConfig()
+
+    # Thermal noise model for open-system simulations
+    from qec_config.utils import c_ops_gen_thermal, bose_einstein_N
 """
 
 from .config import QECConfig, BaconShorConfig, PlotConfig
+from .utils import (
+    c_ops_gen_thermal,
+    c_ops_gen_thermal_full,
+    bose_einstein_N,
+    spectral_amp,
+    MHz_to_rad_s,
+    rad_s_to_MHz,
+    us_to_s,
+    s_to_us,
+    break_at_swaps,
+)
 
-__all__ = ['QECConfig', 'BaconShorConfig', 'PlotConfig']
-__version__ = '1.1.0'
+__all__ = [
+    'QECConfig',
+    'BaconShorConfig',
+    'PlotConfig',
+    # Noise model
+    'c_ops_gen_thermal',
+    'c_ops_gen_thermal_full',
+    'bose_einstein_N',
+    'spectral_amp',
+    # Unit conversions
+    'MHz_to_rad_s',
+    'rad_s_to_MHz',
+    'us_to_s',
+    's_to_us',
+    # Plotting utilities
+    'break_at_swaps',
+]
+__version__ = '1.2.0'

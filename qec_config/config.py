@@ -12,6 +12,8 @@ from pathlib import Path
 import hashlib
 import json
 
+from .utils import break_at_swaps as _break_at_swaps
+
 
 class PlotConfig:
     """
@@ -31,11 +33,11 @@ class PlotConfig:
     DOUBLE_COLUMN_WIDTH = 7.0  # ~178mm
 
     # Font sizes (optimized for readability at publication size)
-    FONT_SIZE = 10
-    AXES_LABEL_SIZE = 11
-    AXES_TITLE_SIZE = 12
-    TICK_LABEL_SIZE = 9
-    LEGEND_FONT_SIZE = 9
+    FONT_SIZE = 14
+    AXES_LABEL_SIZE = 16
+    AXES_TITLE_SIZE = 16
+    TICK_LABEL_SIZE = 14
+    LEGEND_FONT_SIZE = 12
 
     # Line styles
     LINE_WIDTH = 1.5
@@ -299,13 +301,7 @@ class QECConfigBase:
     @staticmethod
     def break_at_swaps(y_vals, idx_series):
         """Insert NaN at eigenstate assignment changes to break plot lines."""
-        y_broken = np.array(y_vals, dtype=float).copy()
-        idx_arr = np.array(idx_series, dtype=int)
-        swaps = np.where(idx_arr[1:] != idx_arr[:-1])[0] + 1
-        for s in swaps:
-            if 0 < s < len(y_broken):
-                y_broken[s] = np.nan
-        return y_broken
+        return _break_at_swaps(y_vals, idx_series)
 
     def compute_gaps(self, energies_no_penalty, energies_with_penalty):
         """Compute RAP gap and QEC gap from energy spectra."""
