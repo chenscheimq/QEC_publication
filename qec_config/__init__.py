@@ -33,6 +33,8 @@ from .utils import (
     us_to_s,
     s_to_us,
     break_at_swaps,
+    simulate_rap_fidelity,
+    simulate_fidelity_sweep,
 )
 
 __all__ = [
@@ -51,5 +53,8 @@ __all__ = [
     's_to_us',
     # Plotting utilities
     'break_at_swaps',
+    # Simulation helpers
+    'simulate_rap_fidelity',
+    'simulate_fidelity_sweep',
 ]
 __version__ = '1.2.0'

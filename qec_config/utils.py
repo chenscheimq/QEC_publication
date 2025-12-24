@@ -6,13 +6,15 @@ Contains utility functions for quantum error correction simulations:
 - Plotting utilities
 - Thermal noise model (collapse operators for open-system dynamics)
 - Spectral density functions
+- Fidelity simulation helpers
 
 Usage:
     from qec_config.utils import c_ops_gen_thermal, bose_einstein_N, break_at_swaps
+    from qec_config.utils import simulate_rap_fidelity
 """
 
 import numpy as np
-from qutip import tensor, sigmam, qeye
+from qutip import tensor, sigmam, qeye, mesolve
 
 # Physical constants
 K_B = 1.380649e-23  # Boltzmann constant [J/K]
@@ -186,7 +188,11 @@ def c_ops_gen_thermal(t_eval, H_func, n_qubits, lambda_2, T_K):
     - The rates follow detailed balance: Γ_abs/Γ_em = n_th/(n_th + 1)
     """
     # Get instantaneous Hamiltonian eigenstates
-    Ht = H_func(t_eval, None)
+    # H_func can be either H(t) or H(t, args)
+    try:
+        Ht = H_func(t_eval)
+    except TypeError:
+        Ht = H_func(t_eval, None)
     evals, evecs = Ht.eigenstates()
     dim = len(evals)
 
@@ -252,7 +258,7 @@ def c_ops_gen_thermal_full(t_eval, H_func, n_qubits, lambda_2, T_K):
     t_eval : float
         Time at which to evaluate the Hamiltonian (in seconds)
     H_func : callable
-        Function H_func(t, args) -> Qobj that returns the Hamiltonian at time t
+        Function H_func(t) -> Qobj that returns the Hamiltonian at time t
     n_qubits : int
         Number of qubits in the system
     lambda_2 : float
@@ -265,7 +271,10 @@ def c_ops_gen_thermal_full(t_eval, H_func, n_qubits, lambda_2, T_K):
     list of Qobj
         List of collapse operators for use with qutip.mesolve
     """
-    Ht = H_func(t_eval, None)
+    try:
+        Ht = H_func(t_eval)
+    except TypeError:
+        Ht = H_func(t_eval, None)
     evals, evecs = Ht.eigenstates()
     dim = len(evals)
 
@@ -312,3 +321,205 @@ def c_ops_gen_thermal_full(t_eval, H_func, n_qubits, lambda_2, T_K):
                 c_ops.append(np.sqrt(rate_em) * Lop)
 
     return c_ops
+
+
+# =============================================================================
+# Fidelity Simulation Helpers
+# =============================================================================
+
+def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2,
+                          n_steps=None, return_trajectory=False, verbose=False):
+    """
+    Simulate RAP protocol with thermal noise and compute fidelity.
+
+    Performs piecewise master equation simulation using the Lindblad formalism
+    with thermal collapse operators computed at each time segment.
+
+    Parameters
+    ----------
+    config : QECConfigBase
+        QEC configuration object (QECConfig or BaconShorConfig)
+    initial_state : Qobj
+        Initial quantum state (ket)
+    target_state : Qobj
+        Target state for fidelity calculation (ket)
+    Ep : float
+        Penalty energy in rad/s
+    T_K : float
+        Temperature in Kelvin
+    lambda_2 : float
+        Coupling strength parameter for thermal noise
+    n_steps : int, optional
+        Number of simulation time steps. If None, uses len(config.t_list)
+    return_trajectory : bool, optional
+        If True, return fidelity at each time step (default False)
+    verbose : bool, optional
+        If True, print progress (default False)
+
+    Returns
+    -------
+    float or tuple
+        If return_trajectory=False: final fidelity to target state
+        If return_trajectory=True: (final_fidelity, fidelity_trajectory)
+
+    Example
+    -------
+    >>> from qec_config import QECConfig
+    >>> config = QECConfig(n_points=201)
+    >>> Ep = config.Ep_MHz_to_rad(75)
+    >>> fidelity = simulate_rap_fidelity(
+    ...     config, config.logical_zero, config.logical_one,
+    ...     Ep=Ep, T_K=0.02, lambda_2=5e-3
+    ... )
+    """
+    # Determine number of qubits from config
+    if hasattr(config, 'code_name'):
+        n_qubits = 3 if config.code_name == 'rep3' else 4
+    else:
+        n_qubits = int(np.log2(config.dim))
+
+    # Get time list (optionally subsample for speed)
+    if n_steps is not None and n_steps < len(config.t_list):
+        indices = np.linspace(0, len(config.t_list) - 1, n_steps, dtype=int)
+        t_list = config.t_list[indices]
+    else:
+        t_list = config.t_list
+
+    # Build Hamiltonian function
+    H_func = config.make_H_func(Ep=Ep, pulse_type='gaussian')
+
+    # Expectation operators for tracking
+    rho_target = target_state * target_state.dag()
+    rho_initial = initial_state * initial_state.dag()
+    e_ops = [rho_initial, rho_target]
+
+    # Initialize density matrix
+    rho = initial_state * initial_state.dag()
+
+    # Track fidelity trajectory if requested
+    fidelity_trajectory = [float((rho_target * rho).tr().real)]
+
+    # Solver options (QuTiP 5 uses dict)
+    opts = {'store_states': True, 'nsteps': 10000, 'rtol': 1e-6, 'atol': 1e-8}
+
+    # Piecewise simulation
+    prev_time = float(t_list[0])
+
+    for k, t_next in enumerate(t_list[1:]):
+        t_next = float(t_next)
+        t_mid = 0.5 * (prev_time + t_next)
+
+        # Compute thermal collapse operators at segment midpoint
+        try:
+            c_ops = c_ops_gen_thermal(t_mid, H_func, n_qubits, lambda_2, T_K)
+        except Exception:
+            c_ops = None
+
+        # Propagate one segment
+        t_steps = [prev_time, t_next]
+        try:
+            result = mesolve(H_func, rho, t_steps, c_ops=c_ops,
+                           e_ops=e_ops, options=opts)
+        except Exception as e1:
+            # Fallback: try without collapse operators
+            try:
+                result = mesolve(H_func, rho, t_steps, c_ops=None,
+                               e_ops=e_ops, options=opts)
+            except Exception as exc:
+                if verbose:
+                    print(f"Solver failed at t={t_mid:.2e}: {exc}")
+                # Keep previous state and continue
+                fidelity_trajectory.append(fidelity_trajectory[-1])
+                prev_time = t_next
+                continue
+
+        # Update state
+        if hasattr(result, 'states') and result.states:
+            rho = result.states[-1]
+        prev_time = t_next
+
+        # Track fidelity
+        try:
+            fid = float(result.expect[1][-1])
+        except Exception:
+            fid = float((rho_target * rho).tr().real)
+        fidelity_trajectory.append(fid)
+
+        if verbose and (k + 1) % 50 == 0:
+            print(f"  Step {k+1}/{len(t_list)-1}, fidelity = {fid:.4f}")
+
+    # Final fidelity
+    final_fidelity = float((rho_target * rho).tr().real)
+
+    if return_trajectory:
+        return final_fidelity, np.array(fidelity_trajectory)
+    return final_fidelity
+
+
+def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
+                            n_steps=None, verbose=True):
+    """
+    Sweep over penalty energies and temperatures to compute fidelity matrix.
+
+    Simulates RAP protocol from |0_L⟩ to |1_L⟩ for each (Ep, T) combination.
+
+    Parameters
+    ----------
+    config : QECConfigBase
+        QEC configuration object
+    Ep_values : array-like
+        Array of penalty energies in rad/s
+    T_values : array-like
+        Array of temperatures in Kelvin
+    lambda_2 : float
+        Coupling strength parameter
+    n_steps : int, optional
+        Number of simulation time steps (for speed)
+    verbose : bool, optional
+        If True, print progress
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'fidelities': 2D array of final fidelities [T_idx, Ep_idx]
+        - 'Ep_values': Ep values in rad/s
+        - 'Ep_MHz': Ep values in MHz
+        - 'T_values': Temperature values in K
+    """
+    n_Ep = len(Ep_values)
+    n_T = len(T_values)
+
+    fidelities = np.zeros((n_T, n_Ep))
+
+    initial_state = config.logical_zero
+    target_state = config.logical_one
+
+    if verbose:
+        print(f"Simulating {config.code_name}: {n_T} temperatures × {n_Ep} Ep values")
+        print("=" * 60)
+
+    for i, T in enumerate(T_values):
+        if verbose:
+            print(f"  T = {T*1e3:.1f} mK ...", end="", flush=True)
+
+        for j, Ep in enumerate(Ep_values):
+            fid = simulate_rap_fidelity(
+                config, initial_state, target_state,
+                Ep=Ep, T_K=T, lambda_2=lambda_2,
+                n_steps=n_steps, verbose=False
+            )
+            fidelities[i, j] = fid
+
+        if verbose:
+            print(f" done (avg fid = {fidelities[i].mean():.4f})")
+
+    if verbose:
+        print("=" * 60)
+
+    return {
+        'fidelities': fidelities,
+        'Ep_values': np.array(Ep_values),
+        'Ep_MHz': np.array([config.to_MHz(Ep) for Ep in Ep_values]),
+        'T_values': np.array(T_values)
+    }
