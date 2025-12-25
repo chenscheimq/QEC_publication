@@ -335,6 +335,9 @@ def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2
     Performs piecewise master equation simulation using the Lindblad formalism
     with thermal collapse operators computed at each time segment.
 
+    For Bacon-Shor code, tracks both logical and ancilla (gauge) degrees of freedom
+    and returns total fidelity as logical_one + ancilla_one.
+
     Parameters
     ----------
     config : QECConfigBase
@@ -352,31 +355,33 @@ def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2
     n_steps : int, optional
         Number of simulation time steps. If None, uses len(config.t_list)
     return_trajectory : bool, optional
-        If True, return fidelity at each time step (default False)
+        If True, return additional trajectory info (default False)
     verbose : bool, optional
         If True, print progress (default False)
 
     Returns
     -------
-    float or tuple
-        If return_trajectory=False: final fidelity to target state
-        If return_trajectory=True: (final_fidelity, fidelity_trajectory)
+    dict
+        Dictionary containing:
+        - 'fidelity': total fidelity (logical_one for rep, logical_one + ancilla_one for BS)
+        - 'fidelity_logical': fidelity to logical_one only
+        - 'trajectory': fidelity trajectory (if return_trajectory=True)
+        - 'trajectory_logical': logical-only trajectory (if return_trajectory=True)
 
     Example
     -------
     >>> from qec_config import QECConfig
     >>> config = QECConfig(n_points=201)
     >>> Ep = config.Ep_MHz_to_rad(75)
-    >>> fidelity = simulate_rap_fidelity(
+    >>> result = simulate_rap_fidelity(
     ...     config, config.logical_zero, config.logical_one,
-    ...     Ep=Ep, T_K=0.02, lambda_2=5e-3
+    ...     Ep=Ep, T_K=0.02, lambda_2=1e4
     ... )
+    >>> print(result['fidelity'])
     """
-    # Determine number of qubits from config
-    if hasattr(config, 'code_name'):
-        n_qubits = 3 if config.code_name == 'rep3' else 4
-    else:
-        n_qubits = int(np.log2(config.dim))
+    # Determine number of qubits and if this is Bacon-Shor
+    is_bacon_shor = hasattr(config, 'code_name') and config.code_name == 'bacon_shor'
+    n_qubits = 4 if is_bacon_shor else 3
 
     # Get time list (optionally subsample for speed)
     if n_steps is not None and n_steps < len(config.t_list):
@@ -388,16 +393,33 @@ def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2
     # Build Hamiltonian function
     H_func = config.make_H_func(Ep=Ep, pulse_type='gaussian')
 
-    # Expectation operators for tracking
-    rho_target = target_state * target_state.dag()
-    rho_initial = initial_state * initial_state.dag()
-    e_ops = [rho_initial, rho_target]
+    # Build expectation operators
+    rho_L0 = config.logical_zero * config.logical_zero.dag()
+    rho_L1 = config.logical_one * config.logical_one.dag()
+
+    if is_bacon_shor:
+        # For Bacon-Shor, also track ancilla (gauge) states
+        rho_A0 = config.ancilla_zero * config.ancilla_zero.dag()
+        rho_A1 = config.ancilla_one * config.ancilla_one.dag()
+        e_ops = [rho_L0, rho_L1, rho_A0, rho_A1]
+    else:
+        e_ops = [rho_L0, rho_L1]
 
     # Initialize density matrix
     rho = initial_state * initial_state.dag()
 
-    # Track fidelity trajectory if requested
-    fidelity_trajectory = [float((rho_target * rho).tr().real)]
+    # Track trajectories
+    trajectory_logical = []
+    trajectory_total = []
+
+    # Initial fidelities
+    fid_L1_init = float((rho_L1 * rho).tr().real)
+    trajectory_logical.append(fid_L1_init)
+    if is_bacon_shor:
+        fid_A1_init = float((rho_A1 * rho).tr().real)
+        trajectory_total.append(fid_L1_init + fid_A1_init)
+    else:
+        trajectory_total.append(fid_L1_init)
 
     # Solver options (QuTiP 5 uses dict)
     opts = {'store_states': True, 'nsteps': 10000, 'rtol': 1e-6, 'atol': 1e-8}
@@ -428,8 +450,9 @@ def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2
             except Exception as exc:
                 if verbose:
                     print(f"Solver failed at t={t_mid:.2e}: {exc}")
-                # Keep previous state and continue
-                fidelity_trajectory.append(fidelity_trajectory[-1])
+                # Keep previous values and continue
+                trajectory_logical.append(trajectory_logical[-1])
+                trajectory_total.append(trajectory_total[-1])
                 prev_time = t_next
                 continue
 
@@ -438,22 +461,47 @@ def simulate_rap_fidelity(config, initial_state, target_state, Ep, T_K, lambda_2
             rho = result.states[-1]
         prev_time = t_next
 
-        # Track fidelity
+        # Extract expectation values
         try:
-            fid = float(result.expect[1][-1])
+            fid_L1 = float(np.real(result.expect[1][-1]))
+            if is_bacon_shor:
+                fid_A1 = float(np.real(result.expect[3][-1]))
+                fid_total = fid_L1 + fid_A1
+            else:
+                fid_total = fid_L1
         except Exception:
-            fid = float((rho_target * rho).tr().real)
-        fidelity_trajectory.append(fid)
+            fid_L1 = float((rho_L1 * rho).tr().real)
+            if is_bacon_shor:
+                fid_A1 = float((rho_A1 * rho).tr().real)
+                fid_total = fid_L1 + fid_A1
+            else:
+                fid_total = fid_L1
+
+        trajectory_logical.append(fid_L1)
+        trajectory_total.append(fid_total)
 
         if verbose and (k + 1) % 50 == 0:
-            print(f"  Step {k+1}/{len(t_list)-1}, fidelity = {fid:.4f}")
+            print(f"  Step {k+1}/{len(t_list)-1}, fidelity = {fid_total:.4f}")
 
-    # Final fidelity
-    final_fidelity = float((rho_target * rho).tr().real)
+    # Compute final fidelities
+    final_fid_L1 = float((rho_L1 * rho).tr().real)
+    if is_bacon_shor:
+        final_fid_A1 = float((rho_A1 * rho).tr().real)
+        final_fid_total = final_fid_L1 + final_fid_A1
+    else:
+        final_fid_total = final_fid_L1
+
+    # Build result dictionary
+    result_dict = {
+        'fidelity': final_fid_total,
+        'fidelity_logical': final_fid_L1,
+    }
 
     if return_trajectory:
-        return final_fidelity, np.array(fidelity_trajectory)
-    return final_fidelity
+        result_dict['trajectory'] = np.array(trajectory_total)
+        result_dict['trajectory_logical'] = np.array(trajectory_logical)
+
+    return result_dict
 
 
 def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
@@ -482,7 +530,8 @@ def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
     -------
     dict
         Dictionary containing:
-        - 'fidelities': 2D array of final fidelities [T_idx, Ep_idx]
+        - 'fidelities': 2D array of total fidelities [T_idx, Ep_idx]
+        - 'fidelities_logical': 2D array of logical-only fidelities [T_idx, Ep_idx]
         - 'Ep_values': Ep values in rad/s
         - 'Ep_MHz': Ep values in MHz
         - 'T_values': Temperature values in K
@@ -491,6 +540,7 @@ def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
     n_T = len(T_values)
 
     fidelities = np.zeros((n_T, n_Ep))
+    fidelities_logical = np.zeros((n_T, n_Ep))
 
     initial_state = config.logical_zero
     target_state = config.logical_one
@@ -504,12 +554,13 @@ def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
             print(f"  T = {T*1e3:.1f} mK ...", end="", flush=True)
 
         for j, Ep in enumerate(Ep_values):
-            fid = simulate_rap_fidelity(
+            result = simulate_rap_fidelity(
                 config, initial_state, target_state,
                 Ep=Ep, T_K=T, lambda_2=lambda_2,
                 n_steps=n_steps, verbose=False
             )
-            fidelities[i, j] = fid
+            fidelities[i, j] = result['fidelity']
+            fidelities_logical[i, j] = result['fidelity_logical']
 
         if verbose:
             print(f" done (avg fid = {fidelities[i].mean():.4f})")
@@ -519,6 +570,7 @@ def simulate_fidelity_sweep(config, Ep_values, T_values, lambda_2,
 
     return {
         'fidelities': fidelities,
+        'fidelities_logical': fidelities_logical,
         'Ep_values': np.array(Ep_values),
         'Ep_MHz': np.array([config.to_MHz(Ep) for Ep in Ep_values]),
         'T_values': np.array(T_values)
