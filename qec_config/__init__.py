@@ -22,7 +22,7 @@ Usage:
     from qec_config.utils import c_ops_gen_thermal, bose_einstein_N
 """
 
-from .config import QECConfig, BaconShorConfig, PlotConfig
+from .config import QECConfig, BaconShorConfig, PlotConfig, SimulationParams
 from .utils import (
     c_ops_gen_thermal,
     c_ops_gen_thermal_full,
@@ -33,12 +33,15 @@ from .utils import (
     us_to_s,
     s_to_us,
     break_at_swaps,
+    simulate_rap_fidelity,
+    simulate_fidelity_sweep,
 )
 
 __all__ = [
     'QECConfig',
     'BaconShorConfig',
     'PlotConfig',
+    'SimulationParams',
     # Noise model
     'c_ops_gen_thermal',
     'c_ops_gen_thermal_full',
@@ -51,5 +54,8 @@ __all__ = [
     's_to_us',
     # Plotting utilities
     'break_at_swaps',
+    # Simulation helpers
+    'simulate_rap_fidelity',
+    'simulate_fidelity_sweep',
 ]
 __version__ = '1.2.0'

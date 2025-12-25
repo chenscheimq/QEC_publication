@@ -149,6 +149,61 @@ class PlotConfig:
         return plt.figure(figsize=(width, height))
 
 
+class SimulationParams:
+    """
+    Simulation parameters for thermal noise fidelity calculations.
+
+    These are IBM-platform parameters based on dilution fridge conditions.
+
+    Usage:
+        from qec_config import SimulationParams
+        params = SimulationParams()
+        lambda_2 = params.LAMBDA_2
+        temperatures = params.TEMPERATURES
+    """
+
+    # Thermal noise coupling strength (IBM platform)
+    LAMBDA_2 = 1e4
+
+    # Physical temperature (Kelvin) - default for single-T simulations
+    T_PHYS_K = 0.015
+
+    # Temperature sweep for multi-T simulations (Kelvin)
+    # Dilution fridge regime: 8-50 mK
+    TEMPERATURES = np.array([0.008, 0.010, 0.015, 0.020, 0.030, 0.050], dtype=float)
+
+    # Penalty energy sweep (MHz) - converted to rad/s when used
+    EP_MIN_MHZ = 10
+    EP_MAX_MHZ = 250
+    N_EP_POINTS = 10
+
+    # Time discretization for simulations
+    N_POINTS = 101
+
+    @classmethod
+    def get_Ep_sweep_rad(cls):
+        """Return Ep sweep values in rad/s."""
+        return 2 * np.pi * np.linspace(cls.EP_MIN_MHZ, cls.EP_MAX_MHZ, cls.N_EP_POINTS) * 1e6
+
+    @classmethod
+    def get_Ep_sweep_MHz(cls):
+        """Return Ep sweep values in MHz."""
+        return np.linspace(cls.EP_MIN_MHZ, cls.EP_MAX_MHZ, cls.N_EP_POINTS)
+
+    @classmethod
+    def info(cls):
+        """Print simulation parameters."""
+        print("=" * 60)
+        print("Simulation Parameters (IBM Platform)")
+        print("=" * 60)
+        print(f"  lambda_2     = {cls.LAMBDA_2:.0e}")
+        print(f"  T_phys       = {cls.T_PHYS_K * 1e3:.1f} mK")
+        print(f"  Ep range     = {cls.EP_MIN_MHZ} - {cls.EP_MAX_MHZ} MHz ({cls.N_EP_POINTS} points)")
+        print(f"  Temperatures = {cls.TEMPERATURES * 1e3} mK")
+        print(f"  n_points     = {cls.N_POINTS}")
+        print("=" * 60)
+
+
 class QECConfigBase:
     """
     Base configuration class for QEC simulations with RAP protocols.
