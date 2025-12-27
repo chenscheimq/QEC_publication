@@ -324,6 +324,401 @@ def c_ops_gen_thermal_full(t_eval, H_func, n_qubits, lambda_2, T_K):
 
 
 # =============================================================================
+# Ornstein-Uhlenbeck (1/f-like) Control Noise
+# =============================================================================
+
+def sigma_from_rms(target_rms, tau):
+    """
+    Convert target RMS amplitude to Ornstein-Uhlenbeck noise strength sigma.
+
+    The stationary variance of an OU process is σ²τ/2, so RMS = σ√(τ/2).
+    Inverting: σ = √2 × RMS / √τ
+
+    Parameters
+    ----------
+    target_rms : float
+        Desired RMS amplitude of the noise (in same units as sigma, e.g., rad/s)
+    tau : float
+        Correlation time of the OU process (in seconds)
+
+    Returns
+    -------
+    float
+        OU noise strength parameter sigma
+
+    Example
+    -------
+    >>> omega_max = 2*np.pi*25e6  # 25 MHz
+    >>> rms = 0.2 * omega_max     # 20% RMS
+    >>> tau = 0.6e-6              # 0.6 µs correlation time
+    >>> sigma = sigma_from_rms(rms, tau)
+    """
+    return (np.sqrt(2.0) * float(target_rms)) / np.sqrt(float(tau))
+
+
+def rms_from_sigma(sigma, tau):
+    """
+    Convert OU noise strength sigma to RMS amplitude.
+
+    Inverse of sigma_from_rms: RMS = σ√(τ/2)
+
+    Parameters
+    ----------
+    sigma : float
+        OU noise strength parameter
+    tau : float
+        Correlation time of the OU process (in seconds)
+
+    Returns
+    -------
+    float
+        RMS amplitude of the noise
+    """
+    return float(sigma) * np.sqrt(float(tau) / 2.0)
+
+
+def ou_trace(times, tau, sigma, rng=None, seed=None):
+    """
+    Generate an Ornstein-Uhlenbeck (OU) process trace.
+
+    The OU process models 1/f-like colored noise with exponential autocorrelation.
+    It is used to simulate local control noise in quantum systems.
+
+    The discretized update equation is:
+        x(t+dt) = x(t) - (x(t)/τ)dt + σ√dt × ξ
+
+    where ξ is standard Gaussian white noise.
+
+    Parameters
+    ----------
+    times : array-like
+        Time points at which to evaluate the process (in seconds)
+    tau : float
+        Correlation time (decorrelation timescale) in seconds
+    sigma : float
+        Noise strength parameter (use sigma_from_rms to convert from RMS)
+    rng : numpy.random.Generator, optional
+        Random number generator. If None and seed is None, creates new generator.
+    seed : int, optional
+        Random seed for reproducibility. Ignored if rng is provided.
+
+    Returns
+    -------
+    ndarray
+        OU process values at each time point
+
+    Example
+    -------
+    >>> t_list = np.linspace(0, 4e-6, 1001)
+    >>> tau = 0.6e-6  # 0.6 µs
+    >>> sigma = sigma_from_rms(0.2 * 2*np.pi*25e6, tau)
+    >>> noise = ou_trace(t_list, tau, sigma, seed=42)
+    """
+    if rng is None:
+        rng = np.random.default_rng(seed)
+
+    times = np.asarray(times, dtype=float)
+    dt = np.diff(times, prepend=times[0])
+
+    x = 0.0
+    out = np.empty_like(times, dtype=float)
+
+    for i, dti in enumerate(dt):
+        x += (-x / tau) * dti + sigma * np.sqrt(max(dti, 1e-16)) * rng.normal()
+        out[i] = x
+
+    return out
+
+
+def generate_noise_traces(t_list, tau_X, sigma_X, tau_Z, sigma_Z, n_qubits, seed=None):
+    """
+    Generate OU noise traces for all qubits.
+
+    Parameters
+    ----------
+    t_list : array-like
+        Time points
+    tau_X : float
+        Correlation time for transverse (X) noise
+    sigma_X : float
+        Noise strength for transverse noise
+    tau_Z : float
+        Correlation time for longitudinal (Z) noise
+    sigma_Z : float
+        Noise strength for longitudinal noise
+    n_qubits : int
+        Number of qubits (3 for rep code, 4 for Bacon-Shor)
+    seed : int, optional
+        Random seed for reproducibility
+
+    Returns
+    -------
+    tuple
+        (X_traces, Z_traces) where each is a list of n_qubits noise arrays
+    """
+    rng = np.random.default_rng(seed)
+
+    X_traces = [ou_trace(t_list, tau_X, sigma_X, rng) for _ in range(n_qubits)]
+    Z_traces = [ou_trace(t_list, tau_Z, sigma_Z, rng) for _ in range(n_qubits)]
+
+    return X_traces, Z_traces
+
+
+def simulate_control_noise_fidelity(config, Ep, rms_X_frac, tau_X, rms_Z_frac=0.0, tau_Z=None,
+                                     n_realizations=10, n_steps=None, seed=None, verbose=False):
+    """
+    Simulate RAP protocol with local OU (1/f-like) control noise.
+
+    This models noise in the control fields (drive amplitude and detuning) as
+    Ornstein-Uhlenbeck processes with specified RMS and correlation time.
+
+    Parameters
+    ----------
+    config : QECConfigBase
+        QEC configuration object (QECConfig or BaconShorConfig)
+    Ep : float
+        Penalty energy in rad/s
+    rms_X_frac : float
+        RMS of transverse (X) noise as fraction of omega_max
+    tau_X : float
+        Correlation time for X noise in seconds
+    rms_Z_frac : float, optional
+        RMS of longitudinal (Z) noise as fraction of omega_max (default 0)
+    tau_Z : float, optional
+        Correlation time for Z noise in seconds (default: same as tau_X)
+    n_realizations : int, optional
+        Number of noise realizations to average over (default 10)
+    n_steps : int, optional
+        Number of time steps for simulation
+    seed : int, optional
+        Random seed for reproducibility
+    verbose : bool, optional
+        If True, print progress
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'fidelity_mean': mean fidelity over realizations
+        - 'fidelity_std': standard deviation
+        - 'fidelity_logical_mean': mean logical fidelity
+        - 'fidelity_logical_std': std of logical fidelity
+        - 'fidelities': array of individual fidelities
+        - 'fidelities_logical': array of individual logical fidelities
+    """
+    from qutip import sesolve, Qobj
+
+    if tau_Z is None:
+        tau_Z = tau_X
+
+    # Determine if Bacon-Shor
+    is_bacon_shor = hasattr(config, 'code_name') and config.code_name == 'bacon_shor'
+    n_qubits = 4 if is_bacon_shor else 3
+
+    # Get parameters from config
+    omega_max = config.omega_max
+    T_max = config.T_max
+
+    # Convert RMS fractions to sigma values
+    rms_X = rms_X_frac * omega_max
+    rms_Z = rms_Z_frac * omega_max
+    sigma_X = sigma_from_rms(rms_X, tau_X)
+    sigma_Z = sigma_from_rms(rms_Z, tau_Z) if rms_Z_frac > 0 else 0.0
+
+    # Get time list
+    if n_steps is not None and n_steps < len(config.t_list):
+        indices = np.linspace(0, len(config.t_list) - 1, n_steps, dtype=int)
+        t_list = config.t_list[indices]
+    else:
+        t_list = config.t_list
+
+    # Get operators
+    X_L = config.X_L
+    Z_L = config.Z_L
+    S_total = config.get_stabilizer_penalty()
+
+    # Single-qubit X and Z operators
+    X_ops = config.get_single_qubit_X_ops()
+    Z_ops = config.get_single_qubit_Z_ops()
+
+    # Clean pulse functions
+    def omega_t(t):
+        return config.omega_func(t)
+
+    def delta_t(t):
+        return config.delta_func(t)
+
+    # Projectors for fidelity
+    proj_L0 = config.logical_zero * config.logical_zero.dag()
+    proj_L1 = config.logical_one * config.logical_one.dag()
+
+    if is_bacon_shor:
+        proj_A0 = config.ancilla_zero * config.ancilla_zero.dag()
+        proj_A1 = config.ancilla_one * config.ancilla_one.dag()
+        e_ops = [proj_L0, proj_L1, proj_A0, proj_A1]
+    else:
+        e_ops = [proj_L0, proj_L1]
+
+    # Initial state
+    psi0 = config.logical_zero
+
+    # Master RNG
+    rng_master = np.random.default_rng(seed)
+
+    fidelities = []
+    fidelities_logical = []
+
+    for r in range(n_realizations):
+        # Generate noise traces for this realization
+        r_seed = rng_master.integers(1 << 30)
+        X_traces, Z_traces = generate_noise_traces(
+            t_list, tau_X, sigma_X, tau_Z, sigma_Z, n_qubits, seed=r_seed
+        )
+
+        # Create interpolation functions for noise
+        from scipy.interpolate import interp1d
+
+        xi_X_funcs = [interp1d(t_list, X_traces[i], kind='linear', fill_value='extrapolate')
+                      for i in range(n_qubits)]
+        xi_Z_funcs = [interp1d(t_list, Z_traces[i], kind='linear', fill_value='extrapolate')
+                      for i in range(n_qubits)]
+
+        # Build time-dependent Hamiltonian
+        def make_coeff(func):
+            return lambda t, args: float(func(t))
+
+        H = [
+            [X_L, lambda t, args: omega_t(t)],
+            [Z_L, lambda t, args: delta_t(t)],
+            -Ep * S_total,
+        ]
+
+        # Add noise terms
+        for i in range(n_qubits):
+            H.append([X_ops[i], make_coeff(xi_X_funcs[i])])
+            if sigma_Z > 0:
+                H.append([Z_ops[i], make_coeff(xi_Z_funcs[i])])
+
+        # Solve
+        try:
+            result = sesolve(H, psi0, t_list, e_ops=e_ops)
+            fid_L1 = float(np.real(result.expect[1][-1]))
+            if is_bacon_shor:
+                fid_A1 = float(np.real(result.expect[3][-1]))
+                fid_total = fid_L1 + fid_A1
+            else:
+                fid_total = fid_L1
+        except Exception as e:
+            if verbose:
+                print(f"  Realization {r} failed: {e}")
+            fid_total = 0.0
+            fid_L1 = 0.0
+
+        fidelities.append(fid_total)
+        fidelities_logical.append(fid_L1)
+
+        if verbose and (r + 1) % 10 == 0:
+            print(f"  Realization {r+1}/{n_realizations}, fid = {fid_total:.4f}")
+
+    fidelities = np.array(fidelities)
+    fidelities_logical = np.array(fidelities_logical)
+
+    return {
+        'fidelity_mean': fidelities.mean(),
+        'fidelity_std': fidelities.std(),
+        'fidelity_logical_mean': fidelities_logical.mean(),
+        'fidelity_logical_std': fidelities_logical.std(),
+        'fidelities': fidelities,
+        'fidelities_logical': fidelities_logical,
+    }
+
+
+def compute_Ep_vs_rms_curve(config, tau_X, rms_fracs, Ep_grid, target_fid=0.99,
+                             tau_Z=None, rms_Z_frac=0.0, n_realizations=5,
+                             n_steps=51, seed=None, verbose=True):
+    """
+    Compute required Ep to achieve target fidelity for each RMS amplitude.
+
+    For each RMS value, finds the minimum Ep from Ep_grid that achieves
+    the target fidelity.
+
+    Parameters
+    ----------
+    config : QECConfigBase
+        QEC configuration object
+    tau_X : float
+        Correlation time for X noise in seconds
+    rms_fracs : array-like
+        Array of RMS fractions (of omega_max) to sweep
+    Ep_grid : array-like
+        Grid of Ep values to search (in rad/s)
+    target_fid : float, optional
+        Target fidelity (default 0.99)
+    tau_Z : float, optional
+        Correlation time for Z noise
+    rms_Z_frac : float, optional
+        Fixed Z noise RMS fraction
+    n_realizations : int, optional
+        Number of noise realizations per (Ep, RMS) point
+    n_steps : int, optional
+        Number of time steps
+    seed : int, optional
+        Random seed
+    verbose : bool, optional
+        If True, print progress
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'Ep_required': array of required Ep values (NaN if not achieved)
+        - 'rms_fracs': input RMS fractions
+        - 'rms_MHz': RMS values in MHz
+        - 'tau_X': correlation time used
+        - 'target_fid': target fidelity used
+    """
+    omega_max = config.omega_max
+    rms_fracs = np.asarray(rms_fracs)
+    Ep_grid = np.asarray(Ep_grid)
+
+    Ep_required = np.full(len(rms_fracs), np.nan)
+
+    rng_master = np.random.default_rng(seed)
+
+    for i, rms_frac in enumerate(rms_fracs):
+        if verbose:
+            print(f"  RMS = {rms_frac*100:.1f}% ...", end="", flush=True)
+
+        # Search Ep grid
+        for Ep in Ep_grid:
+            r_seed = rng_master.integers(1 << 30)
+            result = simulate_control_noise_fidelity(
+                config, Ep, rms_frac, tau_X,
+                rms_Z_frac=rms_Z_frac, tau_Z=tau_Z,
+                n_realizations=n_realizations, n_steps=n_steps,
+                seed=r_seed, verbose=False
+            )
+
+            if result['fidelity_mean'] >= target_fid:
+                Ep_required[i] = Ep
+                break
+
+        if verbose:
+            if np.isnan(Ep_required[i]):
+                print(" not achieved")
+            else:
+                print(f" Ep = {Ep_required[i]/(2*np.pi*1e6):.1f} MHz")
+
+    return {
+        'Ep_required': Ep_required,
+        'rms_fracs': rms_fracs,
+        'rms_MHz': rms_fracs * omega_max / (2 * np.pi * 1e6),
+        'tau_X': tau_X,
+        'target_fid': target_fid,
+    }
+
+
+# =============================================================================
 # Fidelity Simulation Helpers
 # =============================================================================
 
