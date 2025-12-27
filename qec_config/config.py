@@ -401,6 +401,30 @@ class QECConfigBase:
         return Ep_MHz * 2 * np.pi * 1e6
 
     # =========================================================================
+    # Control Noise Helpers
+    # =========================================================================
+
+    def get_stabilizer_penalty(self):
+        """Return the stabilizer/gauge penalty Hamiltonian term."""
+        return self._get_penalty_term()
+
+    def omega_func(self, t):
+        """Default omega(t) function for control noise simulations."""
+        return self.omega_sinusoidal(t)
+
+    def delta_func(self, t):
+        """Default delta(t) function for control noise simulations."""
+        return self.delta_sinusoidal(t)
+
+    def get_single_qubit_X_ops(self):
+        """Return list of single-qubit X operators for each qubit."""
+        raise NotImplementedError("Subclass must implement get_single_qubit_X_ops")
+
+    def get_single_qubit_Z_ops(self):
+        """Return list of single-qubit Z operators for each qubit."""
+        raise NotImplementedError("Subclass must implement get_single_qubit_Z_ops")
+
+    # =========================================================================
     # Data Caching
     # =========================================================================
 
@@ -539,6 +563,22 @@ class QECConfig(QECConfigBase):
         """Return stabilizer penalty: S1 + S2"""
         return self.S1 + self.S2
 
+    def get_single_qubit_X_ops(self):
+        """Return list of single-qubit X operators for each qubit."""
+        return [
+            tensor(self.X, self.I, self.I),  # X1
+            tensor(self.I, self.X, self.I),  # X2
+            tensor(self.I, self.I, self.X),  # X3
+        ]
+
+    def get_single_qubit_Z_ops(self):
+        """Return list of single-qubit Z operators for each qubit."""
+        return [
+            tensor(self.Z, self.I, self.I),  # Z1
+            tensor(self.I, self.Z, self.I),  # Z2
+            tensor(self.I, self.I, self.Z),  # Z3
+        ]
+
     def info(self):
         """Print configuration summary."""
         print("=" * 60)
@@ -616,6 +656,24 @@ class BaconShorConfig(QECConfigBase):
     def _get_penalty_term(self):
         """Return gauge penalty: sum(G)"""
         return sum(self.G)
+
+    def get_single_qubit_X_ops(self):
+        """Return list of single-qubit X operators for each qubit."""
+        return [
+            tensor(self.X, self.I, self.I, self.I),  # X1
+            tensor(self.I, self.X, self.I, self.I),  # X2
+            tensor(self.I, self.I, self.X, self.I),  # X3
+            tensor(self.I, self.I, self.I, self.X),  # X4
+        ]
+
+    def get_single_qubit_Z_ops(self):
+        """Return list of single-qubit Z operators for each qubit."""
+        return [
+            tensor(self.Z, self.I, self.I, self.I),  # Z1
+            tensor(self.I, self.Z, self.I, self.I),  # Z2
+            tensor(self.I, self.I, self.Z, self.I),  # Z3
+            tensor(self.I, self.I, self.I, self.Z),  # Z4
+        ]
 
     def track_logical_projected(self, Ep, pulse_type='gaussian'):
         """

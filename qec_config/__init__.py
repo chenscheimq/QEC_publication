@@ -35,6 +35,13 @@ from .utils import (
     break_at_swaps,
     simulate_rap_fidelity,
     simulate_fidelity_sweep,
+    # OU (1/f-like) control noise
+    sigma_from_rms,
+    rms_from_sigma,
+    ou_trace,
+    generate_noise_traces,
+    simulate_control_noise_fidelity,
+    compute_Ep_vs_rms_curve,
 )
 
 __all__ = [
@@ -42,7 +49,7 @@ __all__ = [
     'BaconShorConfig',
     'PlotConfig',
     'SimulationParams',
-    # Noise model
+    # Thermal noise model
     'c_ops_gen_thermal',
     'c_ops_gen_thermal_full',
     'bose_einstein_N',
@@ -57,5 +64,12 @@ __all__ = [
     # Simulation helpers
     'simulate_rap_fidelity',
     'simulate_fidelity_sweep',
+    # OU (1/f-like) control noise
+    'sigma_from_rms',
+    'rms_from_sigma',
+    'ou_trace',
+    'generate_noise_traces',
+    'simulate_control_noise_fidelity',
+    'compute_Ep_vs_rms_curve',
 ]
 __version__ = '1.2.0'
